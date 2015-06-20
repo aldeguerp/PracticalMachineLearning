@@ -1,0 +1,167 @@
+---
+title: "Practical Machine Learning"
+author: "aldeguerp"
+date: "19 Jun 2015"
+output: html_document
+---
+
+# Summary
+
+The objective in this assignment is to train a system to classify Human Activity. Details of the data set are in the website http://groupware.les.inf.puc-rio.br/har#weight_lifting_exercises
+
+The original data set is a list of registers of some individuals who take measures about 4 sensors while doing some activities. 
+
+In this assignment we will perform a machine learning algorith using caret library from R and try to determine the classification for 20 samples in a test set.
+
+```{r results='hide', message=FALSE, warning=FALSE, echo=FALSE}
+#Library dependencies
+library(caret)
+library(randomForest)
+library(MASS)
+library(gbm)
+library(plyr)
+
+library(doParallel)
+
+# enable multi-core processing
+library(doParallel)
+cl <- makeCluster(detectCores())
+registerDoParallel(cl)
+
+```
+
+
+First, we have to read the train data and set seed (to reproducibility)
+```{r}
+set.seed(123)
+
+train <- read.csv("pml-training.csv")
+```
+
+There are `r dim(train)[2]` in the original data set corresponding to:
+* information about the sample: individual, time, etc
+* measures from the 4 sensors: belt, arm, forearm and dumbbell
+* classe: classification group
+
+In the measured data there are also some variables with almost all its values to blank or NA, so we eliminated them.
+
+The clean data is obtain with the follow chunk:
+
+```{r}
+
+sub_train <- subset(train,select = grep("^yaw|^pitch|^roll|^gyros|^accel|^magnet|classe",names(train),value=TRUE))
+```
+It only remains `dim(sub_train)[2]` variables. 
+
+There is a huge set of initial data, so I decided to create 3 groups (in case we need more validations or secondary train).
+With a distribution as follows:
+* Train: 2/3 of the samples
+* Test: 2/6 of the samples
+* Validation: 1/6 of the samples
+
+
+```{r}
+inTrain = createDataPartition(sub_train$classe, p = 2/3)[[1]]
+final_train <- sub_train[inTrain,]
+final_notrain <- sub_train[-inTrain,]
+inTest = createDataPartition(final_notrain$classe, p = 2/3)[[1]]
+final_test <- final_notrain[inTest,]
+final_val <- final_notrain[-inTest,]
+```
+
+We use some of the learning methods discussed in class: rf, lda, gbm and a combination with all of them.
+
+## Random Forest
+
+```{r cache=TRUE}
+model_rf <- train(form = classe ~ . , data = final_train, method ="rf", trainControl=trainControl(method="cv", number=5,allowParallel=TRUE) )
+predictionRF <- predict(model_rf,final_test)
+confusionMatrix(predictionRF,final_test$classe)$overall[1]
+```
+We also used a parameter to trainControl using cross validation that it's included in caret package.
+The average is very high `r confusionMatrix(predictionRF,final_test$classe)$overall[1]`, almost 1 (perfect prediction).
+
+
+## LDA
+
+```{r cache=TRUE}
+model_lda <- train(form = classe ~ . , data = final_train, method ="lda", trainControl=trainControl(method="cv", number=5,allowParallel=TRUE) )
+predictionLDA <- predict(model_lda,final_test)
+confusionMatrix(predictionLDA,final_test$classe)$overall[1]
+```
+This is the less accured method but we can use it's output to improve the combination prediction.
+
+
+## GBM
+
+```{r cache=TRUE,message=FALSE,results='hide'}
+model_gbm <- train(form = classe ~ . , data = final_train, method ="gbm" )
+predictionGBM <- predict(model_gbm,final_test)
+confusionMatrix(predictionGBM,final_test$classe)$overall[1]
+```
+```{r echo=FALSE}
+confusionMatrix(predictionGBM,final_test$classe)$overall[1]
+```
+GBM training method is also very high `r confusionMatrix(predictionGBM,final_test$classe)$overall[1]`.
+
+## Combining previous methods
+
+```{r cache=TRUE}
+prediction <- data.frame(classe=final_test$classe)
+prediction$rf <- predictionRF
+prediction$lda <- predictionLDA
+prediction$gbm <- predictionGBM
+
+
+model_comb <- train(form = classe ~ . , data = prediction, method="rf", trainControl=trainControl(method="cv", number=5,allowParallel=TRUE) )
+predictionComb <- predict(model_comb,prediction)
+confusionMatrix(predictionComb,final_test$classe)$overall[1]
+```
+With less samples this approach is usefull but with this number of samples it's not an improve compared to RF.
+
+## Trying predictor's combination with validation data
+```{r]}
+predictionRF_val <- predict(model_rf,final_val)
+predictionLDA_val <- predict(model_lda,final_val)
+predictionGBM_val <- predict(model_gbm,final_val)
+
+prediction_val <- data.frame(classe=final_val$classe)
+prediction_val$rf <- predictionRF_val
+confusionMatrix(prediction_val$rf,final_val$classe)$overall[1]
+prediction_val$lda <- predictionLDA_val
+prediction_val$gbm <- predictionGBM_val
+
+predictionComb_val <- predict(model_comb,prediction_val)
+confusionMatrix(predictionComb_val,final_val$classe)$overall[1]
+```
+
+The manual combination of methods do not improve RF method, so we will continue with RF model to predic the submission questions.
+
+
+```{r echo=FALSE}
+# The stopCluster is necessary to terminate the extra processes
+stopCluster(cl)
+```
+
+
+## Steps to submission the assignment's results
+
+```{r}
+test <- read.csv("pml-testing.csv")
+
+answers <- predict(model_rf,newdata = test)
+
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+
+setwd("results")
+
+date()
+```
+
+The submission's results for the 20 samples test set have Accuracy=1 with the RF method.
