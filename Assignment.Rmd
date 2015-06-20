@@ -51,7 +51,7 @@ The clean data is obtain with the follow chunk:
 
 sub_train <- subset(train,select = grep("^yaw|^pitch|^roll|^gyros|^accel|^magnet|classe",names(train),value=TRUE))
 ```
-It only remains `dim(sub_train)[2]` variables. 
+It only remains `r dim(sub_train)[2]` variables. 
 
 There is a huge set of initial data, so I decided to create 3 groups (in case we need more validations or secondary train).
 With a distribution as follows:
@@ -161,7 +161,6 @@ pml_write_files = function(x){
 
 setwd("results")
 
-date()
 ```
 
 The submission's results for the 20 samples test set have Accuracy=1 with the RF method.
